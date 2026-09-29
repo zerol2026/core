@@ -1,0 +1,60 @@
+name: Build vMangos Windows x64
+
+on:
+  workflow_dispatch: # 允许手动点击按钮触发编译
+  push:
+    branches: [ "master" ] # 每次 push 代码时也会自动触发
+
+jobs:
+  build-windows:
+    runs-on: windows-2022 # 使用 GitHub 提供的 Windows Server 2022 虚拟机
+    
+    steps:
+      # 1. 检出代码及子模块
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # 2. 安装依赖环境 (OpenSSL, Boost, MySQL)
+      - name: Install dependencies via vcpkg
+        run: |
+          # 使用系统自带的 vcpkg
+          vcpkg integrate install
+          # 安装 64位 Windows 版本的依赖库
+          vcpkg install openssl:x64-windows boost-system:x64-windows boost-program-options:x64-windows boost-thread:x64-windows boost-filesystem:x64-windows boost-regex:x64-windows libmariadb:x64-windows
+        shell: cmd
+
+      # 3. 使用 CMake 生成 Visual Studio 解决方案
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -G "Visual Studio 17 2022" -A x64 ^
+            -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+            -DBUILD_EXTRACTORS=ON ^
+            -DCMAKE_INSTALL_PREFIX=../server_release
+        shell: cmd
+
+      # 4. 编译项目 (Release 模式)
+      - name: Build
+        run: |
+          cd build
+          cmake --build . --config Release --target install
+        shell: cmd
+
+      # 5. 收集运行时必需的 DLL 文件 (防止运行报缺 dll)
+      - name: Gather Dependencies DLLs
+        run: |
+          cd server_release/bin
+          # 从 vcpkg 目录复制必要的动态链接库到 bin 目录
+          copy C:\vcpkg\installed\x64-windows\bin\*.dll .
+        shell: cmd
+
+      # 6. 将编译好的文件打包上传为 Artifact
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmangos-windows-x64-release
+          path: server_release/
+          retention-days: 7 # 编译产物只保留 7 天，过期需重新编译
